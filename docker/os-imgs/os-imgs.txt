@@ -1,4 +1,0 @@
-http://releases.ubuntu.com/focal/ubuntu-20.04.3-live-server-amd64.iso
-https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
-https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.tar.gz
-https://dl-cdn.alpinelinux.org/alpine/v3.15/releases/x86_64/alpine-standard-3.15.0-x86_64.iso

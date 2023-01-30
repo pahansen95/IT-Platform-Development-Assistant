@@ -1,0 +1,22 @@
+metadata:
+  name: hypervisor
+spec:
+  host: hypervisor.example.com
+  port: 22
+  user: bot
+  sshKey: ~/.ssh/id_rsa
+  storageClasses:
+    - name: slow
+      disks:
+        - serial: Vendor-A_e7a11516-7822-4b8b-a4e2-407ece07bca1 # sudo udevadm info -q all /dev/... | grep ID_SERIAL=
+          subsystem: ata # sudo udevadm info -q all /dev/sda | grep ID_BUS= # Or ID_PATH= for NVMe
+      fstype: ext4
+      mountPath: /mnt/slow
+      mountOpts: noatime,nodiratime
+    - name: fast
+      disks:
+        - serial: Vendor-B_37ba061b-ae18-4c3d-8d76-d96ae5036309
+          subsystem: nvme
+      fstype: ext4
+      mountPath: /mnt/fast
+      mountOpts: noatime,nodiratime

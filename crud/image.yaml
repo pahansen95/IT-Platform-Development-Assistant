@@ -1,0 +1,42 @@
+- name: Manage an Image on a Host
+  hosts: all
+  become: yes
+  pre_tasks:
+    - name: Assert CRUD is set & of a valid value
+      ansible.builtin.assert:
+        that:
+          - crud is defined
+          - crud in ["create", "delete"]
+  tasks:
+    - name: Create an Image
+      when: crud == "create"
+      block:
+        - name: Create the Image directory
+          ansible.builtin.file:
+            path: /var/lib/hypervisor/images/{{ metadata.name }}
+            state: directory
+            mode: 0755
+        - name: Download the Image
+          ansible.builtin.get_url:
+            url: "{{ item.url }}"
+            dest: /var/lib/hypervisor/images/{{ metadata.name }}/{{ item.file }}
+            mode: 0644
+            checksum: md5:{{ item.md5 }}
+          loop:
+            - file: root.img
+              url: "{{ spec.os.url }}"
+              md5: "{{ spec.os.md5 }}"
+            - file: kernel
+              url: "{{ spec.kernel.url }}"
+              md5: "{{ spec.kernel.md5 }}"
+            - file: initrd
+              url: "{{ spec.initrd.url }}"
+              md5: "{{ spec.initrd.md5 }}"
+    - name: Delete an Image
+      when: crud == "delete"
+      block:
+        - name: Delete the Image Directory
+          ansible.builtin.file:
+            path: /var/lib/hypervisor/images/{{ metadata.name }}
+            state: absent
+

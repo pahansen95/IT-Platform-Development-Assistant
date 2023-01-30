@@ -1,0 +1,26 @@
+metadata:
+  name: test
+  uuid: c517048f-19ee-4367-93f7-780f9e7bf999
+spec:
+  qemu:
+    bin: /usr/bin/qemu-system-x86_64
+  image:
+    name: ubuntu-22.04-amd64
+    size: 16G
+  cpu: 2
+  memory: 4096
+  network:
+    bridge: uplink
+    hwaddr: 52:54:00:e7:c4:9b
+  volumes:
+    - size: 64G
+      storageClass: slow
+      uuid: 70919fff-4e19-48a0-bb48-f8f73f2e60d5
+    - size: 16G
+      storageClass: fast
+      uuid: 5c94100b-6746-49ec-b7c9-f02844e02b32
+  users:
+    - name: dev
+      sshKeys:
+        - "~/.ssh/dev-homelab.pub"
+      shell: /bin/bash

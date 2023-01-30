@@ -1,0 +1,12 @@
+metadata:
+  name: ubuntu-22.04-amd64
+spec:
+  os:
+    url: https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img
+    md5: 9688fc9011dcd4d960620d2ebb98a639
+  kernel:
+    url: https://cloud-images.ubuntu.com/releases/22.04/release/unpacked/ubuntu-22.04-server-cloudimg-amd64-vmlinuz-generic
+    md5: 69ab97b3c82115183f0215357e1c7cd3
+  initrd:
+    url: https://cloud-images.ubuntu.com/releases/22.04/release/unpacked/ubuntu-22.04-server-cloudimg-amd64-initrd-generic
+    md5: e1ccfda3602ec3bb5f2cd1daa85e3951

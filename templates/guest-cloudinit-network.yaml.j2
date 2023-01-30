@@ -1,0 +1,10 @@
+network:
+  version: 2
+  ethernets:
+    uplink:
+      dhcp4: true
+      dhcp6: false
+      optional: false
+      match:
+        macaddress: {{ spec.network.hwaddr }}
+      set-name: uplink

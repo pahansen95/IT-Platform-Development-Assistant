@@ -1,0 +1,202 @@
+- name: Manage a Guest on a Host
+  hosts: all
+  become: yes
+  pre_tasks:
+    - name: Assert CRUD is set & of a valid value
+      ansible.builtin.assert:
+        that:
+          - crud is defined
+          - crud in ["create", "delete"]
+  tasks:
+    - name: Create a Guest
+      when: crud == "create"
+      block:
+        - name: Create the Guest's Folder
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            mode: 0755
+          loop:
+            - path: /var/lib/hypervisor/guests/{{ metadata.name }}
+            - path: /var/lib/hypervisor/volumes/slow/{{ metadata.name }}
+            - path: /var/lib/hypervisor/volumes/fast/{{ metadata.name }}
+        - name: Setup the Guest's CloudInit
+          block:
+            - name: Template the Guest VM UserData
+              ansible.builtin.template:
+                src: templates/guest-cloudinit-userdata.yaml.j2
+                dest: /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit-userdata.yaml
+                mode: 0644
+            - name: Print the UserData
+              when: debug.enabled | default(false)
+              block:
+                - name: Slurp the UserData
+                  ansible.builtin.slurp:
+                    src: /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit-userdata.yaml
+                  register: rendered_cloudinit_userdata
+                - name: Print the UserData
+                  ansible.builtin.debug:
+                    msg: |
+                      {{ rendered_cloudinit_userdata.content | b64decode }}
+            - name: Template the Guest VM MetaData
+              ansible.builtin.template:
+                src: templates/guest-cloudinit-metadata.yaml.j2
+                dest: /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit-metadata.yaml
+                mode: 0644
+            - name: Print the MetaData
+              when: debug.enabled | default(false)
+              block:
+                - name: Slurp the MetaData
+                  ansible.builtin.slurp:
+                    src: /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit-metadata.yaml
+                  register: rendered_cloudinit_metadata
+                - name: Print the MetaData
+                  ansible.builtin.debug:
+                    msg: |
+                      {{ rendered_cloudinit_metadata.content | b64decode }}
+            - name: Template the Guest VM Network Config
+              ansible.builtin.template:
+                src: templates/guest-cloudinit-network.yaml.j2
+                dest: /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit-network.yaml
+                mode: 0644
+            - name: Print the Network Config
+              when: debug.enabled | default(false)
+              block:
+                - name: Slurp the Network Config
+                  ansible.builtin.slurp:
+                    src: /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit-network.yaml
+                  register: rendered_cloudinit_network
+                - name: Print the Network Config
+                  ansible.builtin.debug:
+                    msg: |
+                      {{ rendered_cloudinit_network.content | b64decode }}
+            - name: Create the Cloud Init Datastore
+              block:
+                - name: Check if the Cloud Init Datastore exists
+                  ansible.builtin.stat:
+                    path: /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit.iso
+                  register: cloudinit_datastore
+                - name: Create the Cloud Init Datastore Image
+                  when: not cloudinit_datastore.stat.exists
+                  ansible.builtin.command: |
+                    cloud-localds \
+                      --network-config /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit-network.yaml \
+                      /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit.iso \
+                      /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit-userdata.yaml \
+                      /var/lib/hypervisor/guests/{{ metadata.name }}/cloudinit-metadata.yaml
+        - name: Create the Guest's Volumes
+          block:
+            - name: Check if the Guest's Root Disk exists
+              ansible.builtin.stat:
+                path: /var/lib/hypervisor/volumes/slow/{{ metadata.name }}/{{ metadata.uuid }}.img
+              register: guest_root_disk
+            - name: Get Information on the Backing Image
+              ansible.builtin.command: |
+                qemu-img info \
+                  --output=json \
+                  /var/lib/hypervisor/images/{{ spec.image.name }}/root.img
+              register: backing_image_info_json
+            - name: Extract the Backing Image
+              ansible.builtin.set_fact:
+                backing_image_info: "{{ backing_image_info_json.stdout | from_json }}"
+            - name: Create the Guest's Root Disk Image
+              ansible.builtin.command: |
+                qemu-img create \
+                  -f qcow2 \
+                  -b /var/lib/hypervisor/images/{{ spec.image.name }}/root.img \
+                  -F {{ backing_image_info.format }} \
+                  /var/lib/hypervisor/volumes/slow/{{ metadata.name }}/{{ metadata.uuid }}.img \
+                  {{ spec.image.size }}
+            - name: Check if the Guest's Volumes exist
+              ansible.builtin.stat:
+                path: /var/lib/hypervisor/volumes/{{ volume.storageClass }}/{{ metadata.name }}/{{ volume.uuid }}.img
+              register: guest_volume
+              loop: "{{ spec.volumes }}"
+              loop_control:
+                loop_var: volume
+            - name: Create the Guest's Volumes
+              when: not guest_volume.results[volume_index].stat.exists
+              ansible.builtin.command: |
+                qemu-img create \
+                  -f qcow2 \
+                  /var/lib/hypervisor/volumes/{{ volume.storageClass }}/{{ metadata.name }}/{{ volume.uuid }}.img \
+                  {{ volume.size }}
+              loop: "{{ spec.volumes }}"
+              loop_control:
+                loop_var: volume
+                index_var: volume_index
+        - name: Setup Guest Management
+          block:
+            - name: Template the Guest VM Executables
+              ansible.builtin.template:
+                src: templates/guest-manage.sh.j2
+                dest: /var/lib/hypervisor/guests/{{ metadata.name }}/manage.sh
+                mode: 0755
+            - name: Print the VM Executable
+              when: debug.enabled | default(false)
+              block:
+                - name: Slurp the VM Executable
+                  ansible.builtin.slurp:
+                    src: /var/lib/hypervisor/guests/{{ metadata.name }}/manage.sh
+                  register: rendered_executable
+                - name: Print the VM Executable
+                  ansible.builtin.debug:
+                    msg: |
+                      {{ rendered_executable.content | b64decode }}
+            - name: Template the Guest VM Systemd Unit
+              ansible.builtin.template:
+                src: templates/guest-manage.service.j2
+                dest: /etc/systemd/system/guest-{{ metadata.name }}.service
+                mode: 0644
+            - name: Print the VM Systemd Unit
+              when: debug.enabled | default(false)
+              block:
+                - name: Slurp the VM Systemd Unit
+                  ansible.builtin.slurp:
+                    src: /etc/systemd/system/guest-{{ metadata.name }}.service
+                  register: rendered_unit
+                - name: Print the VM Systemd Unit
+                  ansible.builtin.debug:
+                    msg: |
+                      {{ rendered_unit.content | b64decode }}
+            - name: Reload the Systemd Units
+              ansible.builtin.systemd:
+                daemon_reload: yes
+        - name: Bring Up the Guest       
+          ansible.builtin.systemd:
+            name: "guest-{{ metadata.name }}.service"
+            state: started
+            enabled: yes
+    - name: Delete a Guest
+      when: crud == "delete"
+      block:
+        - name: Bring Down the Guest
+          block:
+            - name: Discover if the Guest Service is registerd
+              failed_when: false
+              ansible.builtin.command: |
+                systemctl list-unit-files --no-pager guest-{{ metadata.name }}.service
+              register: guest_service
+            - name: Stop the Guest
+              when: guest_service.rc == 0
+              ansible.builtin.systemd:
+                name: "guest-{{ metadata.name }}.service"
+                state: stopped
+                enabled: no
+        - name: Teardown Guest Management
+          block:
+            - name: Remove the Guest VM Systemd Unit
+              ansible.builtin.file:
+                path: /etc/systemd/system/guest-{{ metadata.name }}.service
+                state: absent
+            - name: Reload the Systemd Units
+              ansible.builtin.systemd:
+                daemon_reload: yes
+        - name: Delete the Guest's Files & Folders
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop:
+            - path: /var/lib/hypervisor/guests/{{ metadata.name }}
+            - path: /var/lib/hypervisor/volumes/slow/{{ metadata.name }}
+            - path: /var/lib/hypervisor/volumes/fast/{{ metadata.name }}

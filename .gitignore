@@ -1,2 +1,9 @@
-setup-results.txt
-xo-template.tf
+bin/*
+!bin/fetch.sh
+.venv
+resources/hosts/*.yaml
+!resources/hosts/example.yaml
+resources/guests/*.yaml
+!resources/guests/example.yaml
+resources/images/*.yaml
+!resources/images/example.yaml

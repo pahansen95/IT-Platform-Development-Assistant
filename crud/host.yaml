@@ -1,0 +1,164 @@
+- name: Manage a Host
+  hosts: all
+  become: yes
+  vars:
+    archMap:
+      x86_64: amd64
+      aarch64: arm64
+  pre_tasks:
+    - name: Assert CRUD is set & of a valid value
+      ansible.builtin.assert:
+        that:
+          - crud is defined
+          - crud in ["create", "delete"]
+    - name: Assert that at least one disk exists per storage class
+      ansible.builtin.assert:
+        that:
+          - item.disks | length > 0
+        msg: "At least one disk must be defined per storage class"
+      loop: "{{ spec.storageClasses }}"
+    - name: Assert only one disk exists per storage class
+      ansible.builtin.assert:
+        that:
+          - item.disks | length == 1
+        msg: "Multiple Disks per Storage Class is not currently supported"
+      loop: "{{ spec.storageClasses }}"
+    - name: Don't allow CRUD operations on a Host where Guests exist
+      when: not (force | default(false))
+      block:
+        - name: Check if any Guests exists
+          ansible.builtin.find:
+            paths:
+              - /var/lib/hypervisor/guests
+            file_type: directory
+            patterns:
+              - "*"
+            use_regex: false
+          register: guestStatus
+        - name: Assert that no guests exist
+          ansible.builtin.assert:
+            that:
+              - guestStatus.matched == 0
+            msg: "All guests must be DELETED before applying CRUD operations to a host"
+  tasks:
+    - name: Create a Host
+      when: crud == "create"
+      block:
+        - name: Create the Storage Classes
+          block:
+            - name: Format the Backing Volume
+              community.general.filesystem:
+                dev: "/dev/disk/by-id/{{ item.disks[0].subsystem }}-{{ item.disks[0].serial }}"
+                resizefs: yes
+                fstype: "{{ item.fstype }}"
+              loop: "{{ spec.storageClasses }}"
+            - name: Create the Mount Point
+              ansible.builtin.file:
+                path: "{{ item.mountPath }}"
+                state: directory
+                mode: 0755
+              loop: "{{ spec.storageClasses }}"
+            - name: Mount the Backing Volume
+              ansible.posix.mount:
+                path: "{{ item.mountPath }}"
+                src: "/dev/disk/by-id/{{ item.disks[0].subsystem }}-{{ item.disks[0].serial }}"
+                fstype: "{{ item.fstype }}"
+                opts: "{{ item.mountOpts }}"
+                state: mounted
+              loop: "{{ spec.storageClasses }}"
+        - name: Create the Hypervisor Directory Structure
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            mode: 0755
+          loop:
+            - path: /var/lib/hypervisor
+            - path: /var/lib/hypervisor/volumes
+            - path: /var/lib/hypervisor/images
+            - path: /var/lib/hypervisor/guests
+        - name: Setup Volume Directories
+          block:
+            - name: Create the StorageClass Volume Directories
+              ansible.builtin.file:
+                path: "/var/lib/hypervisor/volumes/{{ item.name }}"
+                state: directory
+                mode: 0755
+              loop: "{{ spec.storageClasses }}"
+            - name: Bind Mount the StorageClass Volumes
+              ansible.posix.mount:
+                path: "/var/lib/hypervisor/volumes/{{ item.name }}"
+                src: "{{ item.mountPath }}"
+                fstype: none
+                opts: bind
+                state: mounted
+              loop: "{{ spec.storageClasses }}"
+        - name: Install Software Dependencies
+          block:
+            - name: Install QEMU, Cloud Init Utils
+              ansible.builtin.apt:
+                pkg:
+                  - qemu-system-arm
+                  - qemu-system-x86
+                  - qemu-kvm
+                  - cloud-image-utils
+                state: present
+            - name: Install JQ, YQ, Kubectl & Helm
+              ansible.builtin.copy:
+                src: "bin/{{ item.name }}-linux-{{ archMap[ansible_architecture] }}"
+                dest: "/usr/local/bin/{{ item.name }}"
+                mode: 0755
+              loop:
+                - name: jq
+                - name: yq
+                - name: kubectl
+                - name: helm
+    - name: Delete a Host
+      when: crud == "delete"
+      block:
+        - name: Uninstall Software Dependencies
+          block:
+            - name: Uninstall QEMU, Cloud Init Utils
+              ansible.builtin.apt:
+                pkg:
+                  - qemu-system-arm
+                  - qemu-system-x86
+                  - qemu-kvm
+                  - cloud-image-utils
+                state: absent
+            - name: Uninstall JQ, YQ, Kubectl & Helm
+              ansible.builtin.file:
+                path: "/usr/local/bin/{{ item.name }}"
+                state: absent
+              loop:
+                - name: jq
+                - name: yq
+                - name: kubectl
+                - name: helm
+        - name: Delete the StorageClasses
+          block:
+            - name: Unmount the StorageClass Volumes
+              ansible.posix.mount:
+                path: "/var/lib/hypervisor/volumes/{{ item.name }}"
+                state: unmounted
+              loop: "{{ spec.storageClasses }}"
+            - name: Unmount the StorageClass
+              ansible.posix.mount:
+                path: "{{ item.mountPath }}"
+                state: unmounted
+              loop: "{{ spec.storageClasses }}"
+            - name: Wipe the Filesystem Backing Disks
+              community.general.filesystem:
+                dev: "/dev/disk/by-id/{{ item.disks[0].subsystem }}-{{ item.disks[0].serial }}"
+                state: absent
+              loop: "{{ spec.storageClasses }}"
+            - name: Delete the Mount Paths
+              ansible.builtin.file:
+                path: "{{ item.mountPath }}"
+                state: absent
+              loop: "{{ spec.storageClasses }}"
+        - name: Delete the Hypervisor Directory Structures
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop:
+            - path: /var/lib/hypervisor
